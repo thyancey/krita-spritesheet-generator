@@ -122,12 +122,12 @@ class UISpritesheetGenerator(object):
         self.filterStrategyComboBox.addItem("Auto")
         self.filterStrategyComboBox.addItems(self.krita.filterStrategies())
 
-        self.layerExclusionsListLabel = QLabel("Select layers to exclude:")
-        self.layerExclusionsListLabel.setToolTip("Enabling the checkboxes of layers listed below will exclude them from the spritesheet.")
-        self.layerExclusionsList = QListWidget()
+        self.layersToExportLabel = QLabel("Layers to export:")
+        self.layersToExportLabel.setToolTip("Control which layers will be considered for inclusion in the spritesheet. Hidden layers are not listed.")
+        self.layersToExportListWidget = QListWidget()
         if self.activeDocument != None:
             for layer in self.activeDocument.topLevelNodes():
-                # Ignore invisible layers since they will be excluded anyway
+                # Ignore hidden layers since they will be excluded anyway
                 if not layer.visible():
                     continue
 
@@ -138,8 +138,8 @@ class UISpritesheetGenerator(object):
                 # so that it can be used later when applying layer exclusions.
                 item.setData(Qt.UserRole, layer.uniqueId().toString(QUuid.WithoutBraces))
 
-                item.setCheckState(Qt.Unchecked)
-                self.layerExclusionsList.insertItem(0, item)
+                item.setCheckState(Qt.Checked)
+                self.layersToExportListWidget.insertItem(0, item)
         
         # Toggle to include/exclude empty frames
         self.ignoreEmptyFramesCheckBox = QCheckBox("Ignore empty frames")
@@ -203,8 +203,8 @@ class UISpritesheetGenerator(object):
         self.mainLayout.addWidget(self.ignoreEmptyFramesCheckBox)
 
         self.mainLayout.addWidget(divider)
-        self.mainLayout.addWidget(self.layerExclusionsListLabel)
-        self.mainLayout.addWidget(self.layerExclusionsList)
+        self.mainLayout.addWidget(self.layersToExportLabel)
+        self.mainLayout.addWidget(self.layersToExportListWidget)
 
         # Add the "OK" and "Cancel" buttons
         self.mainLayout.addWidget(self.dialogButtonBox)
@@ -218,12 +218,12 @@ class UISpritesheetGenerator(object):
     def _onConfirmButtonPressed(self):
         self.mainDialog.setEnabled(False)
 
-        exclusionLayers = []
-        for row in range(self.layerExclusionsList.count()):
-            item = self.layerExclusionsList.item(row)
+        layerExclusions = []
+        for row in range(self.layersToExportListWidget.count()):
+            item = self.layersToExportListWidget.item(row)
 
-            if item.checkState() == Qt.Checked:
-                exclusionLayers.append(item.data(Qt.UserRole))
+            if item.checkState() == Qt.Unchecked:
+                layerExclusions.append(item.data(Qt.UserRole))
 
         self.spritesheetGenerator.configure(
             self.filePathField.text(),
@@ -236,7 +236,7 @@ class UISpritesheetGenerator(object):
             self.spriteHeightField.value(),
             self.spritePaddingField.value(),
             self.filterStrategyComboBox.currentText(),
-            exclusionLayers
+            layerExclusions
         )
         
         self.spritesheetGenerator.export()
@@ -257,11 +257,13 @@ class UISpritesheetGenerator(object):
 
     def _onOutputFilePathFieldTextChanged(self, newText: str):
         mainFilepath = Path(newText)
+
         if mainFilepath.is_file():
             self.settingsStorage.setValue(UISpritesheetGenerator.SETTINGS_PREV_OUTPUT_DIRECTORY_KEY, str(mainFilepath.parents[0]))
             self.settingsStorage.setValue(UISpritesheetGenerator.SETTINGS_PREV_OUTPUT_FILENAME_KEY, str(mainFilepath.name))
         elif mainFilepath.is_dir():
             self.settingsStorage.setValue(UISpritesheetGenerator.SETTINGS_PREV_OUTPUT_DIRECTORY_KEY, str(mainFilepath))
+
         self.settingsStorage.sync()
 
     def _onLayoutTypeChanged(self):

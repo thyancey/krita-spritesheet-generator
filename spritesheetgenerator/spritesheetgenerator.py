@@ -290,4 +290,4 @@ class SpritesheetGenerator():
 
         # Export the spritesheet
         self.spritesheetDocument.exportImage(self.exportFilePath, krita.InfoObject())
-        print(f"Spritesheet exported to {self.exportFilePath}")
+        print(f"Spritesheet created at {self.exportFilePath}")

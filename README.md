@@ -38,4 +38,4 @@ After installation, the **Spritesheet Generator** can be opened by navigating to
     * **Padding:** The size of the transparent border added to sprites in the spritesheet. Useful to avoid sprites bleeding into each other.
 
 * **Ignore empty frames:** If enabled (default), empty frames in the animation timeline will not be included in the spritesheet.
-* **Select layers to exclude:** Layers selected in this section will be excluded from the spritesheet.
+* **Layers to export:** Controls which layers will be considered for inclusion in the spritesheet.
