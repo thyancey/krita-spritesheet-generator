@@ -1,11 +1,9 @@
-from PyQt5.QtGui import QPixmap, QIcon
-
 import krita
 import os
 from pathlib import Path
-
 from .spritesheetgenerator import SpritesheetGenerator
-from PyQt5.QtCore import (Qt, QSettings)
+from PyQt5.QtCore import Qt, QSettings
+from PyQt5.QtGui import QPixmap, QIcon
 from PyQt5.QtWidgets import (QDialog, QLineEdit, QCheckBox,
                              QPushButton, QVBoxLayout, QHBoxLayout,
                              QLabel, QDialogButtonBox, QFormLayout,
