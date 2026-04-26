@@ -16,11 +16,10 @@ class UISpritesheetGenerator(object):
     SETTINGS_PREV_OUTPUT_FILENAME_KEY = "prevOutputFilename"
 
     def __init__(self):
-        self.settingsStorage = QSettings("Krita-SpriteSheetGenerator", "SpriteSheetGenerator")
-
         self.krita = krita.Krita.instance()
         self.activeDocument = self.krita.activeDocument()
         self.spritesheetGenerator = SpritesheetGenerator()
+        self.settingsStorage = QSettings("krita-spritesheet-generator", "krita-spritesheet-generator")
 
         # The primary dialog and vertical layout
         self.mainDialog = QDialog()
