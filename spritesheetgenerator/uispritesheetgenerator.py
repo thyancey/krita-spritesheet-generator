@@ -1,17 +1,25 @@
+from PyQt5.QtGui import QPixmap, QIcon
+
 import krita
+import os
 from pathlib import Path
 
 from .spritesheetgenerator import SpritesheetGenerator
-from PyQt5.QtCore import (Qt)
+from PyQt5.QtCore import (Qt, QSettings)
 from PyQt5.QtWidgets import (QDialog, QLineEdit, QCheckBox,
                              QPushButton, QVBoxLayout, QHBoxLayout,
                              QLabel, QDialogButtonBox, QFormLayout,
                              QSpinBox, QComboBox, QGroupBox,
-                             QFrame, QFileDialog, QWidget, QLayout)
+                             QFrame, QFileDialog, QWidget, QListWidget, QListWidgetItem)
 
 class UISpritesheetGenerator(object):
 
+    SETTINGS_PREV_OUTPUT_DIRECTORY_KEY = "prevOutputDirectory"
+    SETTINGS_PREV_OUTPUT_FILENAME_KEY = "prevOutputFilename"
+
     def __init__(self):
+        self.settingsStorage = QSettings("Krita-SpriteSheetGenerator", "SpriteSheetGenerator")
+
         self.krita = krita.Krita.instance()
         self.activeDocument = self.krita.activeDocument()
         self.spritesheetGenerator = SpritesheetGenerator()
@@ -30,6 +38,7 @@ class UISpritesheetGenerator(object):
         self.filePathBrowseButton = QPushButton("Browse")
         self.filePathBrowseButton.setToolTip("Opens this computer's native file browser to select the spritesheet's file path.")
         self.filePathBrowseButton.clicked.connect(self._onBrowseButtonPressed)
+        self.filePathField.textChanged.connect(self._onOutputFilePathFieldTextChanged)
 
         # Constant values for spritesheet layout fields
         spriteCustomLayoutFieldWidth = 170
@@ -115,6 +124,15 @@ class UISpritesheetGenerator(object):
         self.filterStrategyComboBox.setMaximumWidth(spritePropertiesFieldWidth)
         self.filterStrategyComboBox.addItem("Auto")
         self.filterStrategyComboBox.addItems(self.krita.filterStrategies())
+
+        self.layerExclusionsListLabel = QLabel("Layers to exclude:")
+        self.layerExclusionsList = QListWidget()
+        if self.activeDocument != None:
+            for layer in self.activeDocument.topLevelNodes():
+                item = QListWidgetItem(layer.name())
+                item.setIcon(QIcon(QPixmap.fromImage(layer.thumbnail(64, 64))))
+                item.setCheckState(Qt.Unchecked)
+                self.layerExclusionsList.insertItem(0, item)
         
         # Toggle to include/exclude empty frames
         self.ignoreEmptyFramesCheckBox = QCheckBox("Ignore empty frames")
@@ -130,15 +148,18 @@ class UISpritesheetGenerator(object):
         # By default try to use the current document's file path
         # to determine the export directory of the spritesheet.
         # If the document doesn't have a file path set then
-        # the user's home directory will be used. 
-        targetDirectory = None
-        if not self.activeDocument or not self.activeDocument.fileName():
-            targetDirectory = Path.home()
-        else:
-            targetDirectory = Path(self.activeDocument.fileName()).parents[0]
+        # the user's home directory will be used.
 
-        # Set the file name to "spritesheet.png" by default
-        self.filePathField.setText(str(targetDirectory.joinpath("Spritesheet.png")))
+        if not self.activeDocument or not self.activeDocument.fileName():
+            homeDirectory = Path.home()
+        else:
+            homeDirectory = Path(self.activeDocument.fileName()).parents[0]
+
+        targetDirectory = Path(self.settingsStorage.value(UISpritesheetGenerator.SETTINGS_PREV_OUTPUT_DIRECTORY_KEY, homeDirectory))
+        targetFilename = Path(self.settingsStorage.value(UISpritesheetGenerator.SETTINGS_PREV_OUTPUT_FILENAME_KEY, "Spritesheet.png"))
+        targetFilepath = targetDirectory.joinpath(targetFilename)
+
+        self.filePathField.setText(str(targetFilepath))
 
         # Add file path widgets
         self.filePathLayout.addWidget(self.filePathLabel)
@@ -175,6 +196,10 @@ class UISpritesheetGenerator(object):
         # Add the toggle for including/excluding empty frames
         self.mainLayout.addWidget(self.ignoreEmptyFramesCheckBox)
 
+        self.mainLayout.addWidget(divider)
+        self.mainLayout.addWidget(self.layerExclusionsListLabel)
+        self.mainLayout.addWidget(self.layerExclusionsList)
+
         # Add the "OK" and "Cancel" buttons
         self.mainLayout.addWidget(self.dialogButtonBox)
         
@@ -187,6 +212,12 @@ class UISpritesheetGenerator(object):
     def _onConfirmButtonPressed(self):
         self.mainDialog.setEnabled(False)
 
+        exclusionLayers = []
+        for row in range(self.layerExclusionsList.count()):
+            item = self.layerExclusionsList.item(row)
+            if item.checkState() == Qt.Checked:
+                exclusionLayers.append(item.text())
+
         self.spritesheetGenerator.configure(
             self.filePathField.text(),
             self.spritesheetLayoutComboBox.currentText(),
@@ -197,7 +228,9 @@ class UISpritesheetGenerator(object):
             self.spriteWidthField.value(),
             self.spriteHeightField.value(),
             self.spritePaddingField.value(),
-            self.filterStrategyComboBox.currentText())
+            self.filterStrategyComboBox.currentText(),
+            exclusionLayers
+        )
         
         self.spritesheetGenerator.export()
         self.mainDialog.close()
@@ -209,10 +242,20 @@ class UISpritesheetGenerator(object):
         fileDialog = QFileDialog()
         fileDialog.setWindowTitle("Exporting Spritesheet")
         fileDialog.setNameFilter("PNG image (*.png)")
-        
+        fileDialog.setDirectory(self.settingsStorage.value(UISpritesheetGenerator.SETTINGS_PREV_OUTPUT_DIRECTORY_KEY))
+
         if fileDialog.exec():
             fileNames = fileDialog.selectedFiles()
             self.filePathField.setText(fileNames[0])
+
+    def _onOutputFilePathFieldTextChanged(self, newText: str):
+        mainFilepath = Path(newText)
+        if mainFilepath.is_file():
+            self.settingsStorage.setValue(UISpritesheetGenerator.SETTINGS_PREV_OUTPUT_DIRECTORY_KEY, str(mainFilepath.parents[0]))
+            self.settingsStorage.setValue(UISpritesheetGenerator.SETTINGS_PREV_OUTPUT_FILENAME_KEY, str(mainFilepath.name))
+        elif mainFilepath.is_dir():
+            self.settingsStorage.setValue(UISpritesheetGenerator.SETTINGS_PREV_OUTPUT_DIRECTORY_KEY, str(mainFilepath))
+        self.settingsStorage.sync()
 
     def _onLayoutTypeChanged(self):
         layoutType = self.spritesheetLayoutComboBox.currentText()

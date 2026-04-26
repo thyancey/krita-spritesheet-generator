@@ -8,7 +8,7 @@ class SpritesheetGenerator():
     def __init__(self):
         pass
 
-    def configure(self, exportFilePath, spritesheetType, autoCalculateSize, customRowCount, customColumnCount, ignoreEmptyFrames, targetSpriteWidth, targetSpriteHeight, spritePadding, filterStrategy):
+    def configure(self, exportFilePath, spritesheetType, autoCalculateSize, customRowCount, customColumnCount, ignoreEmptyFrames, targetSpriteWidth, targetSpriteHeight, spritePadding, filterStrategy, layerExclusions):
         self.exportFilePath = exportFilePath
         self.spritesheetType = spritesheetType
         self.autoCalculateSize = autoCalculateSize
@@ -21,6 +21,7 @@ class SpritesheetGenerator():
         self.finalSpriteWidth = self.targetSpriteWidth + (self.spritePadding * 2)
         self.finalSpriteHeight = self.targetSpriteHeight + (self.spritePadding * 2)
         self.filterStrategy = filterStrategy
+        self.layerExclusions = layerExclusions
         self.krita = krita.Krita.instance()
         self.activeDocument = self.krita.activeDocument()
         self.animationStartTime = self.activeDocument.fullClipRangeStartTime()
@@ -83,6 +84,33 @@ class SpritesheetGenerator():
 
         print(f"Padding applied. New document size is {self.temporaryDocument.width()} x {self.temporaryDocument.height()}")
 
+    def _applyLayerExclusion(self, node: krita.Node):
+        print(f"Applying layer exclusions {str(self.layerExclusions)}")
+
+        nodesToTest = [node]
+        nodesToHide = []
+        while len(nodesToTest) > 0:
+            localNode: krita.Node = nodesToTest.pop()
+
+            if localNode.name() in self.layerExclusions:
+                print(f"Testing exclusion {localNode.name()} - in exclusion")
+                nodesToHide.append(localNode)
+            else:
+                print(f"Testing exclusion {localNode.name()} not in {self.layerExclusions} - not excluded")
+                for childNode in localNode.childNodes():
+                    nodesToTest.append(childNode)
+
+        while len(nodesToHide) > 0:
+            localNode: krita.Node = nodesToHide.pop()
+            localNode.setVisible(False)
+            print(f"Hiding layer {localNode.name()}")
+
+            for childNode in localNode.childNodes():
+                nodesToHide.append(childNode)
+
+        print("Applying layer exclusions - DONE")
+
+
     def _createSpritesheetDocumentFromFrames(self):
         # If "Auto calculate size" is enabled then the max number of frames is the same as
         # the total number of frames in the document. Otherwise, the max number of frames
@@ -97,6 +125,7 @@ class SpritesheetGenerator():
             
             size = self._getSpritesheetSize(maxFrameCount)
             self._createSpritesheetDocument(size.columns, size.rows)
+            self._applyLayerExclusion(self.temporaryDocument.rootNode())
 
             # Convert all frames to spritesheet layers
             for time in range(self.animationStartTime, self.animationEndTime + 1, 1):
@@ -128,6 +157,8 @@ class SpritesheetGenerator():
             size = self._getSpritesheetSize(frameCount)
             self._createSpritesheetDocument(size.columns, size.rows)
             keyframeTimes = sorted(keyframeTimes)
+
+            self._applyLayerExclusion(self.temporaryDocument.rootNode())
 
             # Convert keyframes to spritesheet layers
             for time in keyframeTimes:
