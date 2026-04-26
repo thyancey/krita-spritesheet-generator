@@ -2,7 +2,7 @@ import krita
 import os
 from pathlib import Path
 from .spritesheetgenerator import SpritesheetGenerator
-from PyQt5.QtCore import Qt, QSettings
+from PyQt5.QtCore import Qt, QSettings, QUuid
 from PyQt5.QtGui import QPixmap, QIcon
 from PyQt5.QtWidgets import (QDialog, QLineEdit, QCheckBox,
                              QPushButton, QVBoxLayout, QHBoxLayout,
@@ -128,6 +128,11 @@ class UISpritesheetGenerator(object):
             for layer in self.activeDocument.topLevelNodes():
                 item = QListWidgetItem(layer.name())
                 item.setIcon(QIcon(QPixmap.fromImage(layer.thumbnail(64, 64))))
+
+                # Store the ID of the layer as metadata in the item
+                # so that it can be used later when applying layer exclusions.
+                item.setData(Qt.UserRole, layer.uniqueId().toString(QUuid.WithoutBraces))
+
                 item.setCheckState(Qt.Unchecked)
                 self.layerExclusionsList.insertItem(0, item)
         
@@ -146,7 +151,6 @@ class UISpritesheetGenerator(object):
         # to determine the export directory of the spritesheet.
         # If the document doesn't have a file path set then
         # the user's home directory will be used.
-
         if not self.activeDocument or not self.activeDocument.fileName():
             homeDirectory = Path.home()
         else:
@@ -212,8 +216,9 @@ class UISpritesheetGenerator(object):
         exclusionLayers = []
         for row in range(self.layerExclusionsList.count()):
             item = self.layerExclusionsList.item(row)
+
             if item.checkState() == Qt.Checked:
-                exclusionLayers.append(item.text())
+                exclusionLayers.append(item.data(Qt.UserRole))
 
         self.spritesheetGenerator.configure(
             self.filePathField.text(),

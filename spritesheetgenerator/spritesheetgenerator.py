@@ -2,6 +2,7 @@ import krita
 import math
 from pathlib import Path
 from collections import namedtuple
+from PyQt5.QtCore import QUuid
 
 class SpritesheetGenerator():
 
@@ -84,31 +85,16 @@ class SpritesheetGenerator():
 
         print(f"Padding applied. New document size is {self.temporaryDocument.width()} x {self.temporaryDocument.height()}")
 
-    def _applyLayerExclusion(self, node: krita.Node):
-        print(f"Applying layer exclusions {str(self.layerExclusions)}")
+    def _applyLayerExclusion(self, layers):
+        print(f"Applying layer exclusions: {str(self.layerExclusions)}")
 
-        nodesToTest = [node]
-        nodesToHide = []
-        while len(nodesToTest) > 0:
-            localNode: krita.Node = nodesToTest.pop()
+        for layer in layers:
+            id = layer.uniqueId().toString(QUuid.WithoutBraces)
+            if id in self.layerExclusions:
+                print(f"Layer [{layer.name()} | {id}] will be excluded from the spritesheet")
+                layer.setVisible(False)
 
-            if localNode.name() in self.layerExclusions:
-                print(f"Testing exclusion {localNode.name()} - in exclusion")
-                nodesToHide.append(localNode)
-            else:
-                print(f"Testing exclusion {localNode.name()} not in {self.layerExclusions} - not excluded")
-                for childNode in localNode.childNodes():
-                    nodesToTest.append(childNode)
-
-        while len(nodesToHide) > 0:
-            localNode: krita.Node = nodesToHide.pop()
-            localNode.setVisible(False)
-            print(f"Hiding layer {localNode.name()}")
-
-            for childNode in localNode.childNodes():
-                nodesToHide.append(childNode)
-
-        print("Applying layer exclusions - DONE")
+        print("Finished applying layer exclusions")
 
 
     def _createSpritesheetDocumentFromFrames(self):
@@ -125,7 +111,7 @@ class SpritesheetGenerator():
             
             size = self._getSpritesheetSize(maxFrameCount)
             self._createSpritesheetDocument(size.columns, size.rows)
-            self._applyLayerExclusion(self.temporaryDocument.rootNode())
+            self._applyLayerExclusion(self.temporaryDocument.topLevelNodes())
 
             # Convert all frames to spritesheet layers
             for time in range(self.animationStartTime, self.animationEndTime + 1, 1):
@@ -158,7 +144,7 @@ class SpritesheetGenerator():
             self._createSpritesheetDocument(size.columns, size.rows)
             keyframeTimes = sorted(keyframeTimes)
 
-            self._applyLayerExclusion(self.temporaryDocument.rootNode())
+            self._applyLayerExclusion(self.temporaryDocument.topLevelNodes())
 
             # Convert keyframes to spritesheet layers
             for time in keyframeTimes:
@@ -304,3 +290,4 @@ class SpritesheetGenerator():
 
         # Export the spritesheet
         self.spritesheetDocument.exportImage(self.exportFilePath, krita.InfoObject())
+        print(f"Spritesheet exported to {self.exportFilePath}")
