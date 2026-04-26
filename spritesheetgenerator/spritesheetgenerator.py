@@ -284,10 +284,6 @@ class SpritesheetGenerator():
         # before attempting to retrieve its pixel data.
         self.spritesheetDocument.waitForDone()
 
-        # If needed, append the correct file extension.
-        if Path(self.exportFilePath).suffix != ".png":
-            self.exportFilePath += ".png"
-
         # Export the spritesheet
         self.spritesheetDocument.exportImage(self.exportFilePath, krita.InfoObject())
-        print(f"Spritesheet created at {self.exportFilePath}")
+        print(f"Spritesheet generated at {self.exportFilePath}")
