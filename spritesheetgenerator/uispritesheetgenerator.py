@@ -122,7 +122,8 @@ class UISpritesheetGenerator(object):
         self.filterStrategyComboBox.addItem("Auto")
         self.filterStrategyComboBox.addItems(self.krita.filterStrategies())
 
-        self.layerExclusionsListLabel = QLabel("Layers to exclude:")
+        self.layerExclusionsListLabel = QLabel("Select layers to exclude:")
+        self.layerExclusionsListLabel.setToolTip("Enabling the checkboxes of layers listed below will exclude them from the spritesheet.")
         self.layerExclusionsList = QListWidget()
         if self.activeDocument != None:
             for layer in self.activeDocument.topLevelNodes():
