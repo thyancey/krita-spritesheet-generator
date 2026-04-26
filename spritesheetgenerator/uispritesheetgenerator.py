@@ -126,6 +126,10 @@ class UISpritesheetGenerator(object):
         self.layerExclusionsList = QListWidget()
         if self.activeDocument != None:
             for layer in self.activeDocument.topLevelNodes():
+                # Ignore invisible layers since they will be excluded anyway
+                if not layer.visible():
+                    continue
+
                 item = QListWidgetItem(layer.name())
                 item.setIcon(QIcon(QPixmap.fromImage(layer.thumbnail(64, 64))))
 
