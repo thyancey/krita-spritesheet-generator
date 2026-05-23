@@ -1,6 +1,7 @@
 import krita
 import math
 import json
+import re
 from pathlib import Path
 from collections import namedtuple
 from PyQt5.QtCore import QUuid
@@ -35,6 +36,7 @@ class SpritesheetGenerator():
         # Parallel list: the marker range end for each exported frame's animation,
         # used to correctly calculate the last keyframe's hold duration
         self.exportedAnimationRangeEnds = []
+        self.exportedAnimationLoops = []
 
         print("Spritesheet generator configuration completed")
         print(f"Export file path: {self.exportFilePath}")
@@ -106,18 +108,21 @@ class SpritesheetGenerator():
         print("Finished applying layer exclusions")
 
 
-    # Pattern for animation marker groups: "A_animname:start-end"
-    # e.g. "A_walk:9-16" or "A_walk_cycle:9-16"
+    # Pattern for animation marker groups: "A_animname:start-end" or "A_animname:start-end:once"
+    # e.g. "A_walk:9-16", "A_walk_cycle:9-16", "A_death:35-50:once"
+    # Groups not matching this pattern are ignored for metadata and composite normally.
     ANIM_MARKER_PREFIX = "A_"
-    ANIM_MARKER_PATTERN = r"^A_([^:]+):(\d+)-(\d+)$"
+    ANIM_MARKER_PATTERN = r"^A_([^:]+):(\d+)-(\d+)(?::once)?$"
+    ANIM_ONCE_PATTERN = r"^A_([^:]+):(\d+)-(\d+):once$"
 
     def _parseAnimationMarkers(self, nodes):
         """
-        Scan top-level nodes for animation marker groups matching "A_name:start-end".
-        Returns a list of (animName, start, end) tuples in document order,
+        Scan top-level nodes for animation marker groups matching:
+          "A_name:start-end"        -> loops
+          "A_name:start-end:once"   -> plays once
+        Returns a list of (animName, start, end, loop) tuples in document order,
         or an empty list if no markers are found.
         """
-        import re
         markers = []
         for node in nodes:
             if node.type() != "grouplayer":
@@ -127,8 +132,9 @@ class SpritesheetGenerator():
                 animName = match.group(1)
                 start = int(match.group(2))
                 end = int(match.group(3))
-                markers.append((animName, start, end))
-                print(f"Animation marker found: '{animName}' frames {start}-{end}")
+                loop = not bool(re.match(self.ANIM_ONCE_PATTERN, node.name()))
+                markers.append((animName, start, end, loop))
+                print(f"Animation marker found: '{animName}' frames {start}-{end} loop={loop}")
         return markers
 
     def _createSpritesheetDocumentFromFrames(self):
@@ -143,7 +149,7 @@ class SpritesheetGenerator():
         else:
             print("No animation markers found - treating entire timeline as 'default'")
             rawFrames = self._collectFramesFromTimeline(topLevelNodes, "default")
-            orderedFrames = [(time, animName, self.animationEndTime) for (time, animName) in rawFrames]
+            orderedFrames = [(time, animName, self.animationEndTime, True) for (time, animName) in rawFrames]
 
         totalFrameCount = len(orderedFrames)
         print(f"Total frames to export: {totalFrameCount}")
@@ -156,13 +162,14 @@ class SpritesheetGenerator():
         size = self._getSpritesheetSize(min(totalFrameCount, maxFrameCount))
         self._createSpritesheetDocument(size.columns, size.rows)
 
-        for (time, animName, rangeEnd) in orderedFrames[:maxFrameCount]:
+        for (time, animName, rangeEnd, loop) in orderedFrames[:maxFrameCount]:
             self.temporaryDocument.setCurrentTime(time)
             self.temporaryDocument.refreshProjection()
             self._convertCurrentFrameToSpritesheetLayer()
             self.exportedFrameTimes.append(time)
             self.exportedFrameAnimations.append(animName)
             self.exportedAnimationRangeEnds.append(rangeEnd)
+            self.exportedAnimationLoops.append(loop)
 
     def _collectFramesFromMarkers(self, markers, allNodes):
         """
@@ -176,9 +183,8 @@ class SpritesheetGenerator():
         hold durations from the gaps between them.
         When ignoreEmptyFrames is False, every frame in the range is exported.
         """
-        import re
         allFrames = []
-        for (animName, start, end) in markers:
+        for (animName, start, end, loop) in markers:
             if self.ignoreEmptyFrames:
                 # Find the marker group and scan its children for keyframes
                 markerGroup = None
@@ -200,9 +206,9 @@ class SpritesheetGenerator():
             else:
                 frames = [(time, animName) for time in range(start, end + 1)]
 
-            # Tag each frame with the marker range end so _exportMetadata
-            # can correctly calculate the last keyframe hold duration
-            allFrames.extend([(time, animName, end) for (time, animName) in frames])
+            # Tag each frame with the marker range end and loop flag so
+            # _exportMetadata can correctly calculate durations and looping
+            allFrames.extend([(time, animName, end, loop) for (time, animName) in frames])
         return allFrames
 
     def _collectFramesFromTimeline(self, layers, animName, rangeStart=None, rangeEnd=None):
@@ -394,8 +400,13 @@ class SpritesheetGenerator():
                     "durationFrames": durationFrames,
                     "durationSeconds": round(durationFrames / fps, 6)
                 })
+            # All frames in this animation share the same loop setting,
+            # so just read it from the first frame's entry
+            firstIndex = framePairs[0][0]
+            loop = self.exportedAnimationLoops[firstIndex]
             animations.append({
                 "name": animName,
+                "loop": loop,
                 "frameCount": len(frames),
                 "frames": frames
             })
