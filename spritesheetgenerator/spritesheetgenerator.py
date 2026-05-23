@@ -1,5 +1,6 @@
 import krita
 import math
+import json
 from pathlib import Path
 from collections import namedtuple
 from PyQt5.QtCore import QUuid
@@ -27,6 +28,8 @@ class SpritesheetGenerator():
         self.activeDocument = self.krita.activeDocument()
         self.animationStartTime = self.activeDocument.fullClipRangeStartTime()
         self.animationEndTime = self.activeDocument.fullClipRangeEndTime()
+        self.frameDuration = self.activeDocument.framesPerSecond()
+        self.exportedFrameTimes = []
 
         print("Spritesheet generator configuration completed")
         print(f"Export file path: {self.exportFilePath}")
@@ -55,6 +58,7 @@ class SpritesheetGenerator():
         self._positionFramesInSpritesheetDocument()
         self._forceCloseDocument(self.temporaryDocument)
         self._exportToFile()
+        self._exportMetadata()
         self._forceCloseDocument(self.spritesheetDocument)
         
     def _createTemporaryDocument(self):
@@ -118,6 +122,7 @@ class SpritesheetGenerator():
                 self.temporaryDocument.setCurrentTime(time)
                 self.temporaryDocument.refreshProjection()
                 self._convertCurrentFrameToSpritesheetLayer()
+                self.exportedFrameTimes.append(time)
         else:
             # Grab all of the keyframes
             keyframeTimes = set()
@@ -151,6 +156,7 @@ class SpritesheetGenerator():
                 self.temporaryDocument.setCurrentTime(time)
                 self.temporaryDocument.refreshProjection()
                 self._convertCurrentFrameToSpritesheetLayer()
+                self.exportedFrameTimes.append(time)
 
     def _createSpritesheetDocument(self, columns, rows):
         self.spritesheetColumns = columns
@@ -275,6 +281,47 @@ class SpritesheetGenerator():
         layers = self.spritesheetDocument.topLevelNodes()
         for index in range(len(layers)):
             layers[index].move(0, index * self.finalSpriteHeight)
+
+    def _exportMetadata(self):
+        fps = self.activeDocument.framesPerSecond()
+        spritesheetName = Path(self.exportFilePath).name
+
+        # Build per-frame data. Each entry records the spritesheet index,
+        # the original timeline time (in frames), and the duration in seconds
+        # until the next keyframe (or end of clip for the last frame).
+        frames = []
+        for i, time in enumerate(self.exportedFrameTimes):
+            if i + 1 < len(self.exportedFrameTimes):
+                nextTime = self.exportedFrameTimes[i + 1]
+            else:
+                # Last frame holds until the end of the clip
+                nextTime = self.animationEndTime + 1
+            durationFrames = nextTime - time
+            durationSeconds = durationFrames / fps
+
+            frames.append({
+                "index": i,
+                "timelineFrame": time,
+                "durationFrames": durationFrames,
+                "durationSeconds": round(durationSeconds, 6)
+            })
+
+        metadata = {
+            "spritesheet": spritesheetName,
+            "fps": fps,
+            "frameWidth": self.finalSpriteWidth,
+            "frameHeight": self.finalSpriteHeight,
+            "columns": self.spritesheetColumns,
+            "rows": self.spritesheetRows,
+            "frameCount": len(frames),
+            "frames": frames
+        }
+
+        metadataPath = Path(self.exportFilePath).with_suffix(".json")
+        with open(metadataPath, "w") as f:
+            json.dump(metadata, f, indent=4)
+
+        print(f"Metadata exported to {metadataPath}")
 
     def _forceCloseDocument(self, document):
         document.close()
