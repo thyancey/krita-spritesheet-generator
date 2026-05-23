@@ -39,3 +39,84 @@ After installation, the **Spritesheet Generator** can be opened by navigating to
 
 * **Ignore empty frames:** If enabled (default), empty frames in the animation timeline will not be included in the spritesheet.
 * **Layers to export:** Controls which layers will be considered for inclusion in the spritesheet.
+
+---
+
+## Animation Markers & JSON Export (Fork Addition)
+
+This fork adds two features on top of the original plugin:
+
+1. **JSON metadata export** — a `.json` sidecar file is written alongside the spritesheet PNG, containing frame indices, durations, and animation names. This is designed for use with the companion [Godot importer addon](`<your Godot addon repo URL here>`).
+
+2. **Animation markers** — named animations can be defined directly in the Krita layer panel using a group naming convention, without needing to manage any external files.
+
+### Defining animations with marker groups
+
+By default the entire timeline exports as a single animation named `default`. To export multiple named animations, create a **Group Layer** for each animation and name it using the pattern:
+
+```
+A_animationname:startframe-endframe
+```
+
+To make an animation play once instead of looping, append `:once`:
+
+```
+A_animationname:startframe-endframe:once
+```
+
+Examples:
+
+| Group name | Animation name | Frames | Loops |
+|---|---|---|---|
+| `A_idle:0-18` | `idle` | 0–18 | yes |
+| `A_walk:19-34` | `walk` | 19–34 | yes |
+| `A_walk_cycle:19-34` | `walk_cycle` | 19–34 | yes |
+| `A_death:35-50:once` | `death` | 35–50 | no |
+
+Place your art layers **inside** the marker group. Groups that don't match the `A_name:start-end` pattern are ignored for animation metadata and composite into the spritesheet normally.
+
+A typical layer panel:
+
+```
+[Group]  A_idle:0-18
+    └─  face
+    └─  legs
+    └─  body
+[Group]  A_walk:19-34
+    └─  face
+    └─  legs
+    └─  body
+[Layer]  Background
+```
+
+### Ignore empty frames with markers
+
+When **Ignore empty frames** is enabled, the exporter scans the child layers inside each marker group for keyframes. Only frames where a keyframe exists are exported, and the hold duration of each frame is derived from the gap between keyframes. This is the recommended setting when your animations use holds (e.g. a 4-drawing walk cycle spread across 24 frames at 24fps).
+
+When disabled, every frame in the marker range is exported at uniform duration.
+
+### JSON output format
+
+The exported `.json` file is written to the same folder as the PNG with the same base name. It contains one entry per animation:
+
+```json
+{
+    "spritesheet": "my_character.png",
+    "fps": 24,
+    "frameWidth": 128,
+    "frameHeight": 128,
+    "columns": 4,
+    "rows": 2,
+    "animations": [
+        {
+            "name": "idle",
+            "loop": true,
+            "frameCount": 4,
+            "frames": [
+                { "index": 0, "timelineFrame": 0, "durationFrames": 6, "durationSeconds": 0.25 },
+                { "index": 1, "timelineFrame": 6, "durationFrames": 6, "durationSeconds": 0.25 }
+            ]
+        }
+    ]
+}
+```
