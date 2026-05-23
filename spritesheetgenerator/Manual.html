@@ -2,34 +2,87 @@
 <!DOCTYPE html>
 
 <html xmlns="http://www.w3.org/1999/xhtml">
-<!--BBD's Krita Script Starter, Feb 2018 -->
 <head><title>Spritesheet Generator Manual</title>
+<style>
+    body { font-family: sans-serif; max-width: 860px; margin: 2em auto; line-height: 1.6; }
+    code { background: #f0f0f0; padding: 0.1em 0.4em; border-radius: 3px; font-size: 0.95em; }
+    pre  { background: #f0f0f0; padding: 1em; border-radius: 4px; }
+    h2   { margin-top: 2em; border-bottom: 1px solid #ccc; padding-bottom: 0.3em; }
+</style>
 </head>
 <body>
+
 <h1 id="spritesheet-generator">Spritesheet Generator</h1>
-<p>The <b>Spritesheet Generator</b> exports the frames in the animation timeline as a spritesheet.</p>
+<p>The <b>Spritesheet Generator</b> exports the frames in the animation timeline as a spritesheet PNG, along with a JSON metadata file for use in game engines such as Godot.</p>
+
 <h2 id="usage">Usage</h2>
-<p>The <b>Spritesheet Generator</b> can be opened by navigating to <b>Tools -> Scripts -> Spritesheet Generator</b>. See below for details on the various options that can be configured.</p>
+<p>Open via <b>Tools → Scripts → Spritesheet Generator</b>.</p>
+
 <h2 id="options">Options</h2>
-<p><b>File path:</b> The file path that the spritesheet will be exported to. The <b>Browse</b> button can be used to open the computer's native file manager.</p>
-<p><b>Spritesheet layout:</b> Determines how the sprites will be organized in the spritesheet.</p>
+
+<p><b>File path:</b> The file path the spritesheet will be exported to. Use the <b>Browse</b> button to pick a location. A <code>.json</code> metadata file is always written to the same folder with the same base name.</p>
+
+<p><b>Spritesheet layout:</b> How sprites are arranged in the sheet.</p>
 <ul>
-    <li><b>Rows:</b> Consecutive sprites will be placed in the same row. Once the row is full, the process will be repeated for the following rows.</li>
-    <li><b>Columns:</b> Consecutive sprites will be placed in the same column. Once the column is full, the process will be repeated for the following columns.</li>
-    <li><b>Horizontal Strip:</b> Sprites will be organized into a single horizontal line.</li>
-    <li><b>Vertical Strip:</b> Sprites will be organized into a single vertical line.</li>
+    <li><b>Rows:</b> Fills each row before moving to the next.</li>
+    <li><b>Columns:</b> Fills each column before moving to the next.</li>
+    <li><b>Horizontal Strip:</b> All sprites in a single row.</li>
+    <li><b>Vertical Strip:</b> All sprites in a single column.</li>
 </ul>
-<p><b>Auto calculate size:</b> If enabled (default), will automatically determine the number of rows and columns needed in the spritesheet. Otherwise, rows and columns can be manually defined.</p>
-<p><b>Rows:</b> The number of rows in the spritesheet. This option is only available when <b>Auto calculate size</b> is disabled.</p>
-<p><b>Columns:</b> The number of columns in the spritesheet. This option is only available when <b>Auto calculate size</b> is disabled.</p>
-<p><b>Sprite dimensions:</b> Options related to the individual size of each sprite in the spritesheet.</p>
+
+<p><b>Auto calculate size:</b> Automatically determines the number of rows and columns. Disable to set them manually.</p>
+
+<p><b>Sprite dimensions:</b></p>
 <ul>
-    <li><b>Width:</b> The desired width of each individual sprite. If this is different than the width of the current document, then the sprites will be resized before being placed in the spritesheet.</li>
-    <li><b>Height:</b> The desired height of each individual sprite. If this is different than the height of the current document, then the sprites will be resized before being placed in the spritesheet.</li>
-    <li><b>Filter:</b> The algorithm that will be used to resize the sprites (if needed).</li>
-    <li><b>Padding:</b> The size of the transparent border added to sprites in the spritesheet. Useful to avoid sprites bleeding into each other.</li>
+    <li><b>Width / Height:</b> Target size per frame. If different from the document size, sprites are scaled on export.</li>
+    <li><b>Filter:</b> Scaling algorithm used when resizing.</li>
+    <li><b>Padding:</b> Transparent border added around each frame to prevent bleeding.</li>
 </ul>
-<p><b>Ignore empty frames:</b> If enabled (default), empty frames in the animation timeline will not be included in the spritesheet.</p>
-<p><b>Layers to export:</b> Controls which layers will be considered for inclusion in the spritesheet.</p>
+
+<p><b>Ignore empty frames:</b> When enabled, only frames that contain keyframes on animated layers are exported. Hold durations are derived from the gap between keyframes. When disabled, every frame in the range is exported at uniform duration.</p>
+
+<p><b>Layers to export:</b> Top-level layers to include in the composite. Uncheck any layer to exclude it.</p>
+
+<h2 id="animation-markers">Animation Markers (Multiple Animations)</h2>
+
+<p>By default the entire timeline is exported as a single animation named <code>default</code>. To export multiple named animations from one document, use <b>animation marker groups</b>.</p>
+
+<h3>Setup</h3>
+<p>Create a <b>Group Layer</b> (Layer → Quick Group, or Ctrl+G) for each animation and name it using the pattern:</p>
+<pre>A_animationname:startframe-endframe</pre>
+<p>Examples:</p>
+<ul>
+    <li><code>A_idle:0-18</code> — exports frames 0 to 18 as an animation named <b>idle</b></li>
+    <li><code>A_walk:19-34</code> — exports frames 19 to 34 as an animation named <b>walk</b></li>
+    <li><code>A_walk_cycle:19-34</code> — underscores are fine; exported as <b>walk_cycle</b></li>
+    <li><code>A_death:35-50:once</code> — plays once instead of looping (see below)</li>
+</ul>
+
+<p>Place your art layers <b>inside</b> the marker group. All visible layers composite normally — the group name is purely metadata.</p>
+
+<p>A typical layer panel looks like this:</p>
+<pre>
+[Group]  A_idle:0-18
+    └─  face
+    └─  legs
+    └─  body
+[Group]  A_walk:19-34
+    └─  face
+    └─  legs
+    └─  body
+[Layer]  Background
+</pre>
+
+<h3>Looping</h3>
+<p>Animations loop by default. To make an animation play once and stop, append <code>:once</code> to the group name:</p>
+<pre>A_death:35-50:once</pre>
+
+<h3>Ignore Empty Frames with Markers</h3>
+<p>When <b>Ignore empty frames</b> is checked, the exporter scans the child layers inside each marker group for keyframes. Only frames where a keyframe exists are exported, and the gap between keyframes defines the hold duration. This is the recommended setting when your animations use holds (e.g. a 4-drawing walk cycle spread across 24 frames).</p>
+<p>When unchecked, every frame in the marker range is exported at uniform duration.</p>
+
+<h3>JSON Output</h3>
+<p>The exported <code>.json</code> file contains one entry per animation with frame indices, durations, and loop settings. It is designed to be consumed by the companion Godot importer plugin — see the Godot addon README for details.</p>
+
 </body>
 </html>

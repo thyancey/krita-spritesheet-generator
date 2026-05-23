@@ -1,6 +1,7 @@
 import krita
 import math
 import json
+import re
 from pathlib import Path
 from collections import namedtuple
 from PyQt5.QtCore import QUuid
@@ -30,6 +31,12 @@ class SpritesheetGenerator():
         self.animationEndTime = self.activeDocument.fullClipRangeEndTime()
         self.frameDuration = self.activeDocument.framesPerSecond()
         self.exportedFrameTimes = []
+        # Parallel list to exportedFrameTimes: the animation name each frame belongs to
+        self.exportedFrameAnimations = []
+        # Parallel list: the marker range end for each exported frame's animation,
+        # used to correctly calculate the last keyframe's hold duration
+        self.exportedAnimationRangeEnds = []
+        self.exportedAnimationLoops = []
 
         print("Spritesheet generator configuration completed")
         print(f"Export file path: {self.exportFilePath}")
@@ -101,62 +108,131 @@ class SpritesheetGenerator():
         print("Finished applying layer exclusions")
 
 
+    # Pattern for animation marker groups: "A_animname:start-end" or "A_animname:start-end:once"
+    # e.g. "A_walk:9-16", "A_walk_cycle:9-16", "A_death:35-50:once"
+    # Groups not matching this pattern are ignored for metadata and composite normally.
+    ANIM_MARKER_PREFIX = "A_"
+    ANIM_MARKER_PATTERN = r"^A_([^:]+):(\d+)-(\d+)(?::once)?$"
+    ANIM_ONCE_PATTERN = r"^A_([^:]+):(\d+)-(\d+):once$"
+
+    def _parseAnimationMarkers(self, nodes):
+        """
+        Scan top-level nodes for animation marker groups matching:
+          "A_name:start-end"        -> loops
+          "A_name:start-end:once"   -> plays once
+        Returns a list of (animName, start, end, loop) tuples in document order,
+        or an empty list if no markers are found.
+        """
+        markers = []
+        for node in nodes:
+            if node.type() != "grouplayer":
+                continue
+            match = re.match(self.ANIM_MARKER_PATTERN, node.name())
+            if match:
+                animName = match.group(1)
+                start = int(match.group(2))
+                end = int(match.group(3))
+                loop = not bool(re.match(self.ANIM_ONCE_PATTERN, node.name()))
+                markers.append((animName, start, end, loop))
+                print(f"Animation marker found: '{animName}' frames {start}-{end} loop={loop}")
+        return markers
+
     def _createSpritesheetDocumentFromFrames(self):
-        # If "Auto calculate size" is enabled then the max number of frames is the same as
-        # the total number of frames in the document. Otherwise, the max number of frames
-        # is determine by the manually defined number of rows and columns.
+        topLevelNodes = self.temporaryDocument.topLevelNodes()
+        self._applyLayerExclusion(topLevelNodes)
+
+        markers = self._parseAnimationMarkers(topLevelNodes)
+
+        if markers:
+            print(f"Found {len(markers)} animation marker(s) - using marker ranges")
+            orderedFrames = self._collectFramesFromMarkers(markers, topLevelNodes)
+        else:
+            print("No animation markers found - treating entire timeline as 'default'")
+            rawFrames = self._collectFramesFromTimeline(topLevelNodes, "default")
+            orderedFrames = [(time, animName, self.animationEndTime, True) for (time, animName) in rawFrames]
+
+        totalFrameCount = len(orderedFrames)
+        print(f"Total frames to export: {totalFrameCount}")
+
+        if self.autoCalculateSize:
+            maxFrameCount = totalFrameCount
+        else:
+            maxFrameCount = self.customRowCount * self.customColumnCount
+
+        size = self._getSpritesheetSize(min(totalFrameCount, maxFrameCount))
+        self._createSpritesheetDocument(size.columns, size.rows)
+
+        for (time, animName, rangeEnd, loop) in orderedFrames[:maxFrameCount]:
+            self.temporaryDocument.setCurrentTime(time)
+            self.temporaryDocument.refreshProjection()
+            self._convertCurrentFrameToSpritesheetLayer()
+            self.exportedFrameTimes.append(time)
+            self.exportedFrameAnimations.append(animName)
+            self.exportedAnimationRangeEnds.append(rangeEnd)
+            self.exportedAnimationLoops.append(loop)
+
+    def _collectFramesFromMarkers(self, markers, allNodes):
+        """
+        Collect (time, animName) pairs using explicit marker ranges.
+        Marker groups are NOT hidden — art layers live inside them and
+        need to composite normally. The groups are purely organisational;
+        only their name carries metadata.
+
+        When ignoreEmptyFrames is True, scans the group's child layers for
+        keyframes within the range to find only unique drawings, capturing
+        hold durations from the gaps between them.
+        When ignoreEmptyFrames is False, every frame in the range is exported.
+        """
+        allFrames = []
+        for (animName, start, end, loop) in markers:
+            if self.ignoreEmptyFrames:
+                # Find the marker group and scan its children for keyframes
+                markerGroup = None
+                for node in allNodes:
+                    if node.type() == "grouplayer" and re.match(self.ANIM_MARKER_PATTERN, node.name()):
+                        match = re.match(self.ANIM_MARKER_PATTERN, node.name())
+                        if match and match.group(1) == animName:
+                            markerGroup = node
+                            break
+
+                if markerGroup is not None:
+                    children = markerGroup.childNodes()
+                    frames = self._collectFramesFromTimeline(
+                        children, animName, rangeStart=start, rangeEnd=end
+                    )
+                else:
+                    # Fallback if group not found
+                    frames = [(time, animName) for time in range(start, end + 1)]
+            else:
+                frames = [(time, animName) for time in range(start, end + 1)]
+
+            # Tag each frame with the marker range end and loop flag so
+            # _exportMetadata can correctly calculate durations and looping
+            allFrames.extend([(time, animName, end, loop) for (time, animName) in frames])
+        return allFrames
+
+    def _collectFramesFromTimeline(self, layers, animName, rangeStart=None, rangeEnd=None):
+        """Collect (time, animName) pairs for the given layers and time range."""
+        start = rangeStart if rangeStart is not None else self.animationStartTime
+        end = rangeEnd if rangeEnd is not None else self.animationEndTime
+
         if self.autoCalculateSize:
             maxFrameCount = (self.animationEndTime + 1) - self.animationStartTime
         else:
             maxFrameCount = self.customRowCount * self.customColumnCount
 
         if not self.ignoreEmptyFrames:
-            print(f"Adding {maxFrameCount} frames to the spritesheet document")
-            
-            size = self._getSpritesheetSize(maxFrameCount)
-            self._createSpritesheetDocument(size.columns, size.rows)
-            self._applyLayerExclusion(self.temporaryDocument.topLevelNodes())
-
-            # Convert all frames to spritesheet layers
-            for time in range(self.animationStartTime, self.animationEndTime + 1, 1):
-                self.temporaryDocument.setCurrentTime(time)
-                self.temporaryDocument.refreshProjection()
-                self._convertCurrentFrameToSpritesheetLayer()
-                self.exportedFrameTimes.append(time)
+            return [(time, animName) for time in range(start, end + 1)]
         else:
-            # Grab all of the keyframes
             keyframeTimes = set()
-            topLevelLayers = self.temporaryDocument.topLevelNodes()
-            maxFramesReached = False
-            currentLayer = 0
-
-            while currentLayer < len(topLevelLayers) and not maxFramesReached:
-                for time in range(self.animationStartTime, self.animationEndTime + 1, 1):
+            for layer in layers:
+                for time in range(start, end + 1):
                     if len(keyframeTimes) >= maxFrameCount:
-                        maxFramesReached = True
                         break
-
-                    if self._hasKeyframeAtTime(topLevelLayers[currentLayer], time):
+                    if self._hasKeyframeAtTime(layer, time):
                         keyframeTimes.add(time)
-                        print(f"Found keyframe at index: {time}")
-
-                currentLayer += 1
-
-            frameCount = len(keyframeTimes)
-            print(f"Adding {frameCount} frames to the spritesheet document")
-
-            size = self._getSpritesheetSize(frameCount)
-            self._createSpritesheetDocument(size.columns, size.rows)
-            keyframeTimes = sorted(keyframeTimes)
-
-            self._applyLayerExclusion(self.temporaryDocument.topLevelNodes())
-
-            # Convert keyframes to spritesheet layers
-            for time in keyframeTimes:
-                self.temporaryDocument.setCurrentTime(time)
-                self.temporaryDocument.refreshProjection()
-                self._convertCurrentFrameToSpritesheetLayer()
-                self.exportedFrameTimes.append(time)
+                        print(f"  [{animName}] keyframe at {time}")
+            return [(time, animName) for time in sorted(keyframeTimes)]
 
     def _createSpritesheetDocument(self, columns, rows):
         self.spritesheetColumns = columns
@@ -286,24 +362,53 @@ class SpritesheetGenerator():
         fps = self.activeDocument.framesPerSecond()
         spritesheetName = Path(self.exportFilePath).name
 
-        # Build per-frame data. Each entry records the spritesheet index,
-        # the original timeline time (in frames), and the duration in seconds
-        # until the next keyframe (or end of clip for the last frame).
-        frames = []
-        for i, time in enumerate(self.exportedFrameTimes):
-            if i + 1 < len(self.exportedFrameTimes):
-                nextTime = self.exportedFrameTimes[i + 1]
-            else:
-                # Last frame holds until the end of the clip
-                nextTime = self.animationEndTime + 1
-            durationFrames = nextTime - time
-            durationSeconds = durationFrames / fps
+        # Group exported frames by animation name, preserving order.
+        # animationsMap: { animName: [(spritesheetIndex, time), ...] }
+        animationsMap = {}
+        seenNames = []
+        for i, (time, animName) in enumerate(zip(self.exportedFrameTimes, self.exportedFrameAnimations)):
+            if animName not in animationsMap:
+                animationsMap[animName] = []
+                seenNames.append(animName)
+            animationsMap[animName].append((i, time))
 
-            frames.append({
-                "index": i,
-                "timelineFrame": time,
-                "durationFrames": durationFrames,
-                "durationSeconds": round(durationSeconds, 6)
+        # Build the animations array.
+        # When ignoreEmptyFrames is True, frames are keyframe-detected and the gap
+        # between keyframes defines the hold duration — so per-frame durations vary.
+        # When ignoreEmptyFrames is False, every frame is 1 timeline frame long.
+        animations = []
+        for animName in seenNames:
+            framePairs = animationsMap[animName]
+            frames = []
+            for j, (spritesheetIndex, time) in enumerate(framePairs):
+                if self.ignoreEmptyFrames:
+                    # Duration is the gap to the next keyframe in this animation
+                    if j + 1 < len(framePairs):
+                        nextTime = framePairs[j + 1][1]
+                    else:
+                        # Last keyframe: hold until the marker range end + 1
+                        # so the full hold is preserved (e.g. last key at 31,
+                        # range ends at 34 → holds for 3 frames as expected)
+                        rangeEnd = self.exportedAnimationRangeEnds[spritesheetIndex]
+                        nextTime = rangeEnd + 1
+                    durationFrames = nextTime - time
+                else:
+                    durationFrames = 1
+                frames.append({
+                    "index": spritesheetIndex,
+                    "timelineFrame": time,
+                    "durationFrames": durationFrames,
+                    "durationSeconds": round(durationFrames / fps, 6)
+                })
+            # All frames in this animation share the same loop setting,
+            # so just read it from the first frame's entry
+            firstIndex = framePairs[0][0]
+            loop = self.exportedAnimationLoops[firstIndex]
+            animations.append({
+                "name": animName,
+                "loop": loop,
+                "frameCount": len(frames),
+                "frames": frames
             })
 
         metadata = {
@@ -313,15 +418,14 @@ class SpritesheetGenerator():
             "frameHeight": self.finalSpriteHeight,
             "columns": self.spritesheetColumns,
             "rows": self.spritesheetRows,
-            "frameCount": len(frames),
-            "frames": frames
+            "animations": animations
         }
 
         metadataPath = Path(self.exportFilePath).with_suffix(".json")
         with open(metadataPath, "w") as f:
             json.dump(metadata, f, indent=4)
 
-        print(f"Metadata exported to {metadataPath}")
+        print(f"Metadata exported to {metadataPath} with {len(animations)} animation(s)")
 
     def _forceCloseDocument(self, document):
         document.close()
